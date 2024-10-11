@@ -36,7 +36,7 @@ func main() {
 	}
 }
 
-// Create - создание нового чата для пользователей req.Usernames
+// Create - создание нового чата для пользователей
 // возвращает id чата
 func (s *server) Create(_ context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error) {
 	log.Printf("UserId: %v | Chat name: %v", req.GetUserid(), req.GetName())
