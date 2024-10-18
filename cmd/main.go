@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 
+	"github.com/jackc/pgx/v4"
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/dmikhr/chat-server/internal/data"
 	desc "github.com/dmikhr/chat-server/pkg/chat_v1"
 )
 
@@ -17,9 +20,38 @@ const grpcPort = 50051
 
 type server struct {
 	desc.UnimplementedChatV1Server
+	models data.Models
 }
 
 func main() {
+	err := godotenv.Load("../.env")
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	dbUser := os.Getenv("PG_USER")
+	dbPassword := os.Getenv("PG_PASSWORD")
+	dbHost := os.Getenv("PG_HOST")
+	dbPort := os.Getenv("PG_PORT")
+	dbName := os.Getenv("PG_DATABASE_NAME")
+	dbDSN := fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=disable", dbHost, dbPort, dbName, dbUser, dbPassword)
+
+	ctx := context.Background()
+	// Создаем соединение с базой данных
+	con, err := pgx.Connect(ctx, dbDSN)
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer func() {
+		err = con.Close(ctx)
+		if err != nil {
+			fmt.Println("db connection close err:", err)
+		}
+	}()
+
+	// передаем соединение с БД в контекст
+	ctxVal := context.WithValue(ctx, data.DBConn, con)
+
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -27,31 +59,11 @@ func main() {
 
 	s := grpc.NewServer()
 	reflection.Register(s)
-	desc.RegisterChatV1Server(s, &server{})
+	desc.RegisterChatV1Server(s, &server{models: data.InitModels(ctxVal)})
 
 	log.Printf("server listening at %v", lis.Addr())
 
 	if err = s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
-}
-
-// Create - создание нового чата для пользователей
-// возвращает id чата
-func (s *server) Create(_ context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error) {
-	log.Printf("UserId: %v | Chat name: %v", req.GetUserid(), req.GetName())
-	return &desc.CreateResponse{}, nil
-}
-
-// Delete - удаление чата по id
-func (s *server) Delete(_ context.Context, req *desc.DeleteRequest) (*emptypb.Empty, error) {
-	log.Printf("Chat to delete id: %d", req.GetId())
-	return &emptypb.Empty{}, nil
-}
-
-// SendMessage - отправка сообщения
-// From - автор сообщения, Text - текст сообщения, Timestamp - время отправки
-func (s *server) SendMessage(_ context.Context, req *desc.SendMessageRequest) (*emptypb.Empty, error) {
-	log.Printf("Message from: %s | text: %s | time: %v", req.GetFrom(), req.GetText(), req.GetTimestamp())
-	return &emptypb.Empty{}, nil
 }
